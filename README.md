@@ -35,8 +35,8 @@ Kalman Filters estimate the true state of a system, which is hidden, using noisy
 
 The predict step involves propagating the state forward using the system model and adjusting for process noise.
 
-$ \hat{x}_k^- = A \hat{x}_{k-1} + B u_k $
-$ P_k^- = A P_{k-1} A^T + Q_k $
+$$ \hat{x}_k^- = A \hat{x}_{k-1} + B u_k $$
+$$ P_k^- = A P_{k-1} A^T + Q_k $$
 
 - $ \hat{x}_k^- $: Predicted state estimate at time $ k $
 - $ A $: State transition matrix
@@ -55,10 +55,10 @@ $$ K_k = P_k^- H_k^T (H_k P_k^- H_k^T + R_k)^{-1} $$
 $$ \hat{x}_k = \hat{x}_k^- + K_k (z_k - H_k \hat{x}_k^-) $$
 $$ P_k = (I - K_k H_k) P_k^- $$
 
-- K_k : Kalman gain
-- H_k : Observation matrix
-- R_k : Measurement noise covariance matrix
-- z_k : Actual measurement at time k
+- $ K_k $: Kalman gain
+- $ H_k $: Observation matrix
+- $ R_k $: Measurement noise covariance matrix
+- $ z_k $: Actual measurement at time $ k $
 
 ### Observation Model
 

@@ -2,6 +2,10 @@
 
 Kalman Filters are essential tools for estimating the state of dynamic systems, particularly useful when dealing with noisy measurements and uncertain dynamics. This README provides an overview of Kalman Filters, focusing on their application to State of Charge (SoC) estimation in Lithium-Ion batteries.
 
+pdf version:
+[kalmanFilter.pdf](https://github.com/user-attachments/files/16104321/kalmanFilter.pdf)
+
+
 ## Overview
 
 Kalman Filters operate on the principle of blending predictions from a system model with actual measurements to provide the best estimate of the system's state over time. This is particularly useful in scenarios where measurements are noisy and the dynamics of the system are not perfectly known.

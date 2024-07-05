@@ -82,5 +82,5 @@ $$ P_k = (I - K_k H_k) P_k^- $$
 
 Kalman Filters offer a robust method for state estimation in dynamic systems like Lithium-Ion batteries. By integrating predictions with measurements and adjusting for uncertainties, the filter provides an optimal estimate of the system's state over time.
 
-For implementation details and practical examples, refer to the provided code and documentation.
+For implementation details and practical examples, refer to the provided code.
 

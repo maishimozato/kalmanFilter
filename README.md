@@ -55,10 +55,10 @@ $$ K_k = P_k^- H_k^T (H_k P_k^- H_k^T + R_k)^{-1} $$
 $$ \hat{x}_k = \hat{x}_k^- + K_k (z_k - H_k \hat{x}_k^-) $$
 $$ P_k = (I - K_k H_k) P_k^- $$
 
-- $ K_k $: Kalman gain
-- $ H_k $: Observation matrix
-- $ R_k $: Measurement noise covariance matrix
-- $ z_k $: Actual measurement at time $ k $
+- K_k : Kalman gain
+- H_k : Observation matrix
+- R_k : Measurement noise covariance matrix
+- z_k : Actual measurement at time $ k $
 
 ### Observation Model
 

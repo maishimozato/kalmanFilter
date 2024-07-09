@@ -13,6 +13,7 @@ tau2 = R2*C2
 Qnom = 5
 deltaT = 1
 
+#state space matrices
 A = np.array([1,0], [0, np.exp(-deltaT/(R1*C1))])
 B = np.array([-deltaT/Qnom, R1*(1 - np.exp(-deltaT/tau1)), R2*(1 - np.exp(-deltaT/tau2))])
 

@@ -1,10 +1,51 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
-def readSOCOCVCurve():
-    sococv = pd.read_excel("research\SOCOCV.xlsx")
-    return sococv
+def sococvRegression():
+    sococv = pd.read_excel("/Users/maishimozato/Documents/uoft ece - 2nd year/research/SOCOCV.xlsx")
+    SOC = sococv['SOC'].values
+    OCV = sococv['OCV'].values
+    
+    #fit a polynomial of degree 11 to the data
+    coeffs = np.polyfit(SOC, OCV, 11)
+    SOCOCV = np.poly1d(coeffs)
+    
+    SOC_fit = np.linspace(SOC.min(), SOC.max(), 500)
+    OCV_fit = SOCOCV(SOC_fit)
+    
+    SOC_sample = SOC[::120]
+    OCV_sample = OCV[::120]
+    
+    plt.figure(figsize=(10,6))
+    
+    plt.scatter(SOC_sample, OCV_sample, label="Data", s=10, color='blue')
+    plt.plot(SOC_sample, OCV_sample, color='blue', linewidth=0.5)
+    
+    plt.plot(SOC_fit, OCV_fit, color='red', linewidth=2, label='Polynomial Fit')
+    plt.xlabel('SOC')
+    plt.ylabel('OCV')
+    plt.title('SOC vs OCV with Polynomial Fit')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+    
+    return SOCOCV
 
+sococv = sococvRegression()
+
+#a function that relates soc to ocv
+def OCV(soc):
+    SOCOCV = sococvRegression()
+    OCV_value = SOCOCV(soc)
+    return OCV_value
+
+#a function that relates ocv to the terminal voltage
+def g(x,D,u):
+    terminal_voltage = OCV(x[0,0]) - x[1,0] + D*u
+    return terminal_voltage
+
+#the function to predict the new state value based on current state and control input (current) 
 def f_function(A, B, x, u):
     x_new = A@x + B*u
     return x_new
@@ -81,3 +122,15 @@ def ekf():
     P_k = (np.eye(3) - K_k @ H_k) @ P_k
 
     return state_estimate_k, P_k
+
+def plot(estimations, intervals):
+    estimations = np.array(estimations)
+    intervals = np.array(intervals)
+    
+    if estimations.ndim != 1:
+        raise ValueError("estimations must be a 1D array")
+    if intervals.ndim != 1:
+        raise ValueError("intervals must be a 1D array")
+    
+    plt.figure(figsize=(10,6))
+    plt.plot(intervals, estimations, marker='o')

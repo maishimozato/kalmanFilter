@@ -1,24 +1,45 @@
 import numpy as np
+import pandas as pd
 
-# these will need to be calculated using the pulse discharge test
-R0 = 1
-R1 = 1
-C1 = 1
-R2 = 1
-C2 = 1
-Q = 1
+def readSOCOCVCurve():
+    sococv = pd.read_excel("research\SOCOCV.xlsx")
+    return sococv
 
-tau1 = R1*C1
-tau2 = R2*C2
-Qnom = 5
-deltaT = 1
+def f_function(A, B, x, u):
+    x_new = A@x + B*u
+    return x_new
 
-A = np.array([1,0], [0, np.exp(-deltaT/(R1*C1))])
-B = np.array([-deltaT/Qnom, R1*(1 - np.exp(-deltaT/tau1)), R2*(1 - np.exp(-deltaT/tau2))])
+def ekf():
+    
+    #initial SOC
+    SOC_init = 1 
+    #state space x - parameter initialization
+    x_init = np.array([SOC_init, 0, 0])
 
+    SOC_estimations = []
+    Vterminal_estimations = []
+    Vterminal_error = []
+    
+    # these will need to be calculated using the pulse discharge test
+    R0 = 1
+    R1 = 1
+    C1 = 1
+    R2 = 1
+    C2 = 1
+    Q = 1
 
-# template for ekf algorithm
-def ekf(z_k_observation_vector, state_estimate_k_minus_1, P_k_minus_1):
+    tau1 = R1*C1
+    tau2 = R2*C2
+    #time intervals in seconds
+    deltaT = 1
+    #capacity in amp-seconds to match time intervals
+    Qnom = 5.8 * 3600 
+
+    A = np.array([1,0,0], 
+                 [0, np.exp(-deltaT/(tau1)),0], 
+                 [0,0, np.exp(-deltaT/(tau2))])
+    
+    B = np.array([-deltaT/Qnom, R1*(1 - np.exp(-deltaT/tau1)), R2*(1 - np.exp(-deltaT/tau2))])
 
     # state transition matrix 
     A_k = np.eye(3)  

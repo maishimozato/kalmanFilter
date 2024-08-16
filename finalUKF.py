@@ -1,127 +1,176 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import scipy as s 
+import seaborn as sns
+
+from scipy.interpolate import RectBivariateSpline
 
 def sococvRegression():
-    sococv = pd.read_excel("/Users/maishimozato/Documents/uoft ece - 2nd year/research/SOCOCV.xlsx")
+    sococv = pd.read_excel("/Users/maishimozato/Documents/uoft ece - 2nd year/research/dataCollection/SOCOCV.xlsx")
     SOC = sococv['SOC'].values
     OCV = sococv['OCV'].values
     
     #fit a polynomial of degree 11 to the data
     coeffs = np.polyfit(SOC, OCV, 11)
-    SOCOCV = np.poly1d(coeffs)
+    SOCOCV = np.poly1d(coeffs) #create a polynomial
     
     SOC_fit = np.linspace(SOC.min(), SOC.max(), 500)
     OCV_fit = SOCOCV(SOC_fit)
     
-    SOC_sample = SOC[::120]
-    OCV_sample = OCV[::120]
-    
+    sns.set(style="whitegrid")
     plt.figure(figsize=(10,6))
     
-    plt.scatter(SOC_sample, OCV_sample, label="Data", s=10, color='blue')
-    plt.plot(SOC_sample, OCV_sample, color='blue', linewidth=0.5)
+    plt.scatter(SOC, OCV, label="Original Data", s=15, color='blue', alpha=0.7)
+    plt.plot(SOC_fit, OCV_fit, color='red', linewidth=2.5, linestyle='--', label='Polynomial Fit')
     
-    plt.plot(SOC_fit, OCV_fit, color='red', linewidth=2, label='Polynomial Fit')
-    plt.xlabel('SOC')
-    plt.ylabel('OCV')
-    plt.title('SOC vs OCV with Polynomial Fit')
-    plt.legend()
-    plt.grid(True)
+    # Enhance plot with additional formatting
+    plt.xlabel('State of Charge (SOC)', fontsize=14)
+    plt.ylabel('Open Circuit Voltage (OCV)', fontsize=14)
+    plt.title('SOC vs OCV with Polynomial Fit from C/5 OCV discharge test', fontsize=16)
+    plt.legend(fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    
+    # Show the plot
+    plt.tight_layout()
     plt.show()
     
-    return SOCOCV
+    return coeffs, SOCOCV
 
-sococv = sococvRegression()
+#takes in the soc ocv curve and current state soc value
+#returns the derivative of the curve for matrix C
+def Cmatrix(coeffs, soc):
+    #coefficients of the derivative
+    dSOCOCV = np.polyder(coeffs)
+    #slope of ocv soc curve at that point
+    
+    #evaluate the polynomial at x = soc
+    dOCV = np.polyval(dSOCOCV, soc)
+    C_x = np.array([[dOCV, -1, -1]])
+    return C_x
+
+#the function to predict the new state value based on current state and control input (current) 
+def f_function(A, B, x, u):
+    x_new = (A @ np.matrix(x).reshape(3, 1)) + (B * u)
+    return x_new
+
+def covariance(A, P, Q):
+    covariance = (A @ P @ A.T) + Q
+    return covariance 
 
 #a function that relates soc to ocv
 def OCV(soc):
-    SOCOCV = sococvRegression()
+    coeffs, SOCOCV = sococvRegression()
     OCV_value = SOCOCV(soc)
     return OCV_value
 
 #a function that relates ocv to the terminal voltage
 def g(x,D,u):
-    terminal_voltage = OCV(x[0,0]) - x[1,0] + D*u
+    terminal_voltage = OCV(x[0,0]) - x[1, 0] - x[2, 0] - D*u
+    #x[0,0] returns the scalar value while x[0] returns the 1D array of that value
     return terminal_voltage
 
-#the function to predict the new state value based on current state and control input (current) 
-def f_function(A, B, x, u):
-    x_new = A@x + B*u
-    return x_new
-
-def ekf():
+def ekf():  
+    parameters = pd.read_excel("/Users/maishimozato/Documents/uoft ece - 2nd year/research/battery_model.xlsx")
     
     #initial SOC
     SOC_init = 1 
     #state space x - parameter initialization
-    x_init = np.array([SOC_init, 0, 0])
-
-    SOC_estimations = []
-    Vterminal_estimations = []
-    Vterminal_error = []
+    x_pred = np.array([[SOC_init], [0], [0]]) #shape is (3,1)
     
+    T_unique = np.unique(parameters['T'])
+    SOC_unique = np.unique(parameters['SOC'])
     # these will need to be calculated using the pulse discharge test
-    R0 = 1
-    R1 = 1
-    C1 = 1
-    R2 = 1
-    C2 = 1
-    Q = 1
+    #functions that interpolate between the given data
+    R0_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='R0').values)
+    R1_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='R1').values)
+    R2_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='R2').values)
+    C1_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='C1').values)
+    C2_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='C2').values)
+    
+    coeffs, SOCOCV = sococvRegression()
 
-    tau1 = R1*C1
-    tau2 = R2*C2
-    #time intervals in seconds
     deltaT = 1
     #capacity in amp-seconds to match time intervals
     Qnom = 5.8 * 3600 
+    
+    R_x = 2.5e-5
+    P_pred = np.array([[0.025, 0, 0],
+                   [0, 0.01, 0],
+                   [0, 0, 0.01]])
+    Q_x = np.array([[1.0, 1e-6, 0],
+                   [0, 1e-5, 0],
+                   [0, 0, 1e-5]])
+    
+    SOC_estimations = []
+    Vterminal_estimations = []
+    Vterminal_error = []
 
-    A = np.array([1,0,0], 
+    df = pd.read_csv('/Users/maishimozato/Documents/uoft ece - 2nd year/research/B0005_TTD.csv')
+    Vt_actual = df['Voltage_measured']
+    current_actual = df['Current_measured']
+    temp_actual = df['Temperature_measured']
+    
+    step = 1000
+    indices = np.arange(0, len(current_actual), step)
+    current_sample = current_actual[indices]
+    
+    length = len(current_sample)
+    
+    for k in range(length):
+        temp = temp_actual[k]
+        u = current_actual[k]
+        soc = x_pred[0, 0]
+        
+        #scalar values
+        R0 = R0_func(temp, soc)[0,0] 
+        R1 = R1_func(temp, soc)[0,0]
+        R2 = R2_func(temp, soc)[0,0]
+        C1 = C1_func(temp, soc)[0,0]
+        C2 = C2_func(temp, soc)[0,0]
+        
+        #time intervals in seconds
+        tau1 = R1*C1
+        tau2 = R2*C2
+        #state transition matrix
+        A = np.matrix([[1,0,0], 
                  [0, np.exp(-deltaT/(tau1)),0], 
-                 [0,0, np.exp(-deltaT/(tau2))])
-    
-    B = np.array([-deltaT/Qnom, R1*(1 - np.exp(-deltaT/tau1)), R2*(1 - np.exp(-deltaT/tau2))])
-
-    # state transition matrix 
-    A_k = np.eye(3)  
-    # identity matrix - no change in the state model from the previous state
-
-    # define the process noise vector
-    process_noise_v_k_minus_1 = np.array([0.01, 0.01, 0.003])
-
-    # define the state model noise covariance matrix Q_k
-    Q_k = np.eye(3)  
-    # identity matrix - equal noise in all dimensions
-
-    # define the measurement matrix H_k 
-    H_k = np.eye(3)
-    # identity matrix - measurements directly represent the state variables
-
-    # define the measurement noise covariance matrix R_k 
-    R_k = np.eye(3)
-    # identity matrix - equal measurement noise in all dimensions
-
-    # Predict Step
-    state_estimate_k = A_k @ state_estimate_k_minus_1
-    #calculate the predicted state using the state transition matrix and the previous state estimate
-    
-    P_k = A_k @ P_k_minus_1 @ A_k.T + Q_k
-    #predict how much uncertainty there is in the state estimate using the process noise covariance matrix
-
-    # Measurement Residual
-    measurement_residual_y_k = z_k_observation_vector - H_k @ state_estimate_k
-
-    # Innovation Covariance
-    S_k = H_k @ P_k @ H_k.T + R_k
-
-    # Kalman Gain
-    K_k = P_k @ H_k.T @ np.linalg.pinv(S_k)
-
-    # Update Step
-    state_estimate_k = state_estimate_k + K_k @ measurement_residual_y_k
-    P_k = (np.eye(3) - K_k @ H_k) @ P_k
-
-    return state_estimate_k, P_k
+                 [0,0, np.exp(-deltaT/(tau2))]])
+        #shape is (3,3)
+        
+        # identity matrix - no change in the state model from the previous state
+        B = np.matrix([[-deltaT/Qnom], 
+             [R1*(1 - np.exp(-deltaT/tau1))], 
+             [R2*(1 - np.exp(-deltaT/tau2))]])
+        #shape is (3,1)
+        
+        x_pred = f_function(A, B, x_pred, u) #shape is (3,1)
+        #covariance/uncertainty associated with state estimate
+        P_pred = covariance(A, P_pred, Q_x) #shape is (3,3)
+        
+        terminal_voltage = g(x_pred, R0, u) #scalar
+        Vterminal_estimations.append(terminal_voltage)
+        
+        C_x = Cmatrix(coeffs, soc) #shape is (1,3)
+        
+        residual = Vt_actual[k] - terminal_voltage #scalar
+        Vterminal_error.append(residual)
+        
+        S_x = (C_x @ P_pred @ C_x.T) + (R_x * np.eye(3)) #shape is (3,3)
+        
+        KalmanGain = P_pred @ np.linalg.inv(S_x) @ C_x.T #shape is (3,1)
+        
+        #update the state estimation and covariance matrix
+        # Ensure residual is a 1D array for matrix multiplication
+        x_pred = x_pred + (KalmanGain * residual)
+        SOC_estimations.append(x_pred[0,0])
+        
+        I = np.eye(3)
+        P_pred = (I - (KalmanGain @ C_x)) @ (P_pred)
+        
+    return SOC_estimations, Vterminal_estimations, Vterminal_error
 
 def plot(estimations, intervals):
     estimations = np.array(estimations)
@@ -134,3 +183,62 @@ def plot(estimations, intervals):
     
     plt.figure(figsize=(10,6))
     plt.plot(intervals, estimations, marker='o')
+
+def plot_results(SOC_estimations, Vterminal_estimations, Vterminal_error):
+    plt.figure(figsize=(12, 6))
+    
+    plt.subplot(3, 1, 1)
+    plt.plot(SOC_estimations, label='Estimated SOC')
+    plt.title('State of Charge Estimation')
+    plt.xlabel('Time')
+    plt.ylabel('SOC')
+    plt.legend()
+
+    plt.subplot(3, 1, 2)
+    plt.plot(Vterminal_estimations, label='Estimated Terminal Voltage')
+    plt.title('Terminal Voltage Estimation')
+    plt.xlabel('Time')
+    plt.ylabel('Voltage')
+    plt.legend()
+
+    plt.subplot(3, 1, 3)
+    plt.plot(Vterminal_error, label='Voltage Error')
+    plt.title('Voltage Error')
+    plt.xlabel('Time')
+    plt.ylabel('Error')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.show()
+
+coeffs, SOCOCV = sococvRegression()
+#SOC_estimations, Vterminal_estimations, Vterminal_error = ekf()
+#plot_results(SOC_estimations, Vterminal_estimations, Vterminal_error)
+
+# df = pd.read_csv('/Users/maishimozato/Documents/uoft ece - 2nd year/research/B0005_TTD.csv')
+# RecordingTime            = df['Time']
+# Measured_Voltage         = df['Voltage_measured']
+# Measured_Current         = df['Current_measured']
+# Measured_Temperature     = df['Temperature_measured'] 
+
+# plt.figure(figsize=(12, 6))
+
+# # Plot SOC estimations vs. actual SOC measurements
+# plt.subplot(2, 1, 1)
+# plt.plot(socEstimated, label='Estimated SOC', linestyle='--')
+# plt.xlabel('Time Step')
+# plt.ylabel('State of Charge (SOC)')
+# plt.legend()
+# plt.title('SOC Estimations vs. Actual Measurements')
+
+# # Plot Terminal Voltage estimations vs. actual terminal voltage measurements
+# plt.subplot(2, 1, 2)
+# plt.plot(df['Voltage_measured'], label='Actual Voltage')
+# plt.plot(VterminalEstimated, label='Estimated Voltage', linestyle='--')
+# plt.xlabel('Time Step')
+# plt.ylabel('Terminal Voltage (V)')
+# plt.legend()
+# plt.title('Terminal Voltage Estimations vs. Actual Measurements')
+
+# plt.tight_layout()
+# plt.show()

@@ -1,11 +1,10 @@
 import pandas as pd
-import pybamm
 
-# file_path = "/Users/maishimozato/Documents/uoft ece - 2nd year/research/B0005_TTD.csv"
+# Load the CSV file into a DataFrame
+csv_file_path = '/Users/maishimozato/Documents/uoftEce2ndYear/research/dataCollection/combinedOCV.csv'
+df = pd.read_csv(csv_file_path)
 
-# df = pd.read_csv(file_path)
-# # Get the number of rows
-# num_rows = len(df)
-# print(f"Number of rows: {num_rows}")
+# Save the DataFrame to an Excel file
+excel_file_path = '/Users/maishimozato/Documents/uoftEce2ndYear/research/dataCollection/combinedOCV.xlsx'
+df.to_excel(excel_file_path, index=False)
 
-pybamm.print_citations()

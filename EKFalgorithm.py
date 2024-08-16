@@ -15,7 +15,9 @@ def sococvRegression():
     coeffs = np.polyfit(SOC, OCV, 11)
     SOCOCV = np.poly1d(coeffs) #create a polynomial
     
+    #generate a set of evenly spaced values between the min and max values of soc data
     SOC_fit = np.linspace(SOC.min(), SOC.max(), 500)
+    #compute corresponding ocv values for soc using polynomial function
     OCV_fit = SOCOCV(SOC_fit)
     
     sns.set(style="whitegrid")

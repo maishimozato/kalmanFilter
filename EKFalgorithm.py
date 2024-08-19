@@ -4,17 +4,21 @@ import matplotlib.pyplot as plt
 import scipy as s 
 import seaborn as sns
 
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import interp1d
 
 def sococvRegression():
-    sococv = pd.read_excel("/Users/maishimozato/Documents/uoft ece - 2nd year/research/dataCollection/SOCOCV.xlsx")
+    sococv = pd.read_excel("/Users/maishimozato/Documents/uoftEce2ndYear/research/dataCollection/SOCOCV.xlsx")
     SOC = sococv['SOC'].values
     OCV = sococv['OCV'].values
     
     #fit a polynomial of degree 11 to the data
     coeffs = np.polyfit(SOC, OCV, 11)
-    SOCOCV = np.poly1d(coeffs) #create a polynomial
+    #create a polynomial representing ocv as a function of soc
+    SOCOCV = np.poly1d(coeffs)
     
+    return coeffs, SOCOCV, SOC, OCV
+
+def plotSOCOCV(SOC, OCV, SOCOCV):
     #generate a set of evenly spaced values between the min and max values of soc data
     SOC_fit = np.linspace(SOC.min(), SOC.max(), 500)
     #compute corresponding ocv values for soc using polynomial function
@@ -39,16 +43,15 @@ def sococvRegression():
     plt.tight_layout()
     plt.show()
     
-    return coeffs, SOCOCV
+    return
 
 #takes in the soc ocv curve and current state soc value
 #returns the derivative of the curve for matrix C
 def Cmatrix(coeffs, soc):
-    #coefficients of the derivative
+    #coefficients of the derivative - rate of change of ocv with respect to soc
     dSOCOCV = np.polyder(coeffs)
-    #slope of ocv soc curve at that point
     
-    #evaluate the polynomial at x = soc
+    #evaluate the polynomial at x = soc (slope of ocv soc curve at that point)
     dOCV = np.polyval(dSOCOCV, soc)
     C_x = np.array([[dOCV, -1, -1]])
     return C_x
@@ -62,43 +65,45 @@ def covariance(A, P, Q):
     covariance = (A @ P @ A.T) + Q
     return covariance 
 
-#a function that relates soc to ocv
+# Function that relates soc to ocv - non linearity
 def OCV(soc):
-    coeffs, SOCOCV = sococvRegression()
+    coeffs, SOCOCV, SOC, OCV = sococvRegression()
     OCV_value = SOCOCV(soc)
     return OCV_value
 
-#a function that relates ocv to the terminal voltage
+# Function that relates ocv to the terminal voltage
 def g(x,D,u):
     terminal_voltage = OCV(x[0,0]) - x[1, 0] - x[2, 0] - D*u
     #x[0,0] returns the scalar value while x[0] returns the 1D array of that value
     return terminal_voltage
 
+def terminalVoltageToOCV(Vt, x, D, u):
+    return Vt + x[1, 0] + x[2, 0] + D*u
+
 def ekf():  
-    parameters = pd.read_excel("/Users/maishimozato/Documents/uoft ece - 2nd year/research/battery_model.xlsx")
+    parameters = pd.read_excel("/Users/maishimozato/Documents/uoftEce2ndYear/research/dataCollection/battery_model.xlsx")
     
     #initial SOC
     SOC_init = 1 
     #state space x - parameter initialization
     x_pred = np.array([[SOC_init], [0], [0]]) #shape is (3,1)
     
-    T_unique = np.unique(parameters['T'])
-    SOC_unique = np.unique(parameters['SOC'])
     # these will need to be calculated using the pulse discharge test
     #functions that interpolate between the given data
-    R0_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='R0').values)
-    R1_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='R1').values)
-    R2_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='R2').values)
-    C1_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='C1').values)
-    C2_func = RectBivariateSpline(T_unique, SOC_unique, parameters.pivot_table(index='T', columns='SOC', values='C2').values)
+    R0_func = interp1d(parameters['SOC'], parameters['R0'], kind='linear', fill_value='extrapolate')
+    R1_func = interp1d(parameters['SOC'], parameters['R1'], kind='linear', fill_value='extrapolate')
+    R2_func = interp1d(parameters['SOC'], parameters['R2'], kind='linear', fill_value='extrapolate')
+    C1_func = interp1d(parameters['SOC'], parameters['C1'], kind='linear', fill_value='extrapolate')
+    C2_func = interp1d(parameters['SOC'], parameters['C2'], kind='linear', fill_value='extrapolate')
     
-    coeffs, SOCOCV = sococvRegression()
+    coeffs, SOCOCV, SOC, OCV = sococvRegression()
+    plotSOCOCV(SOC, OCV, SOCOCV)
 
     deltaT = 1
     #capacity in amp-seconds to match time intervals
     Qnom = 5.8 * 3600 
     
-    R_x = 2.5e-5
+    R_k = 2.5e-5
     P_pred = np.array([[0.025, 0, 0],
                    [0, 0.01, 0],
                    [0, 0, 0.01]])
@@ -110,10 +115,9 @@ def ekf():
     Vterminal_estimations = []
     Vterminal_error = []
 
-    df = pd.read_csv('/Users/maishimozato/Documents/uoft ece - 2nd year/research/B0005_TTD.csv')
+    df = pd.read_csv('/Users/maishimozato/Documents/uoftEce2ndYear/research/dataCollection/B0005_TTD.csv')
     Vt_actual = df['Voltage_measured']
     current_actual = df['Current_measured']
-    temp_actual = df['Temperature_measured']
     
     step = 1000
     indices = np.arange(0, len(current_actual), step)
@@ -122,16 +126,15 @@ def ekf():
     length = len(current_sample)
     
     for k in range(length):
-        temp = temp_actual[k]
         u = current_actual[k]
         soc = x_pred[0, 0]
         
         #scalar values
-        R0 = R0_func(temp, soc)[0,0] 
-        R1 = R1_func(temp, soc)[0,0]
-        R2 = R2_func(temp, soc)[0,0]
-        C1 = C1_func(temp, soc)[0,0]
-        C2 = C2_func(temp, soc)[0,0]
+        R0 = R0_func(soc)
+        R1 = R1_func(soc)
+        R2 = R2_func(soc)
+        C1 = C1_func(soc)
+        C2 = C2_func(soc)
         
         #time intervals in seconds
         tau1 = R1*C1
@@ -152,6 +155,7 @@ def ekf():
         #covariance/uncertainty associated with state estimate
         P_pred = covariance(A, P_pred, Q_x) #shape is (3,3)
         
+        # estimated terminal voltage based on estimated soc
         terminal_voltage = g(x_pred, R0, u) #scalar
         Vterminal_estimations.append(terminal_voltage)
         
@@ -160,7 +164,7 @@ def ekf():
         residual = Vt_actual[k] - terminal_voltage #scalar
         Vterminal_error.append(residual)
         
-        S_x = (C_x @ P_pred @ C_x.T) + (R_x * np.eye(3)) #shape is (3,3)
+        S_x = (C_x @ P_pred @ C_x.T) + (R_k * np.eye(3)) #shape is (3,3)
         
         KalmanGain = P_pred @ np.linalg.inv(S_x) @ C_x.T #shape is (3,1)
         
@@ -213,9 +217,8 @@ def plot_results(SOC_estimations, Vterminal_estimations, Vterminal_error):
     plt.tight_layout()
     plt.show()
 
-coeffs, SOCOCV = sococvRegression()
-#SOC_estimations, Vterminal_estimations, Vterminal_error = ekf()
-#plot_results(SOC_estimations, Vterminal_estimations, Vterminal_error)
+SOC_estimations, Vterminal_estimations, Vterminal_error = ekf()
+plot_results(SOC_estimations, Vterminal_estimations, Vterminal_error)
 
 # df = pd.read_csv('/Users/maishimozato/Documents/uoft ece - 2nd year/research/B0005_TTD.csv')
 # RecordingTime            = df['Time']

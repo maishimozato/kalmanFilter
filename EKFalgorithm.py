@@ -7,22 +7,33 @@ import seaborn as sns
 from scipy.interpolate import interp1d
 
 def sococvRegression():
+    """
+    - performs polynomial regression to model the relationship between soc and ocv
+    - reads soc and ocv data from excel file, fits a polynomial of degree 11 to this data
+
+    Returns:
+        SOCOCV (np.ndarray) : array of polynomial coeffs fitted to soc-ocv data
+        SOC (np.ndarray) : array of soc values from data
+        OCV (np.ndarray) : array of ocv values corresponding to the soc values
+    """
     sococv = pd.read_excel("/Users/maishimozato/Documents/uoftEce2ndYear/research/dataCollection/SOCOCV.xlsx")
     SOC = sococv['SOC'].values
     OCV = sococv['OCV'].values
+    SOCOCV = np.polyfit(SOC, OCV, 11)
     
-    #fit a polynomial of degree 11 to the data
-    coeffs = np.polyfit(SOC, OCV, 11)
-    #create a polynomial representing ocv as a function of soc
-    SOCOCV = np.poly1d(coeffs)
-    
-    return coeffs, SOCOCV, SOC, OCV
+    return SOCOCV, SOC, OCV
+
 
 def plotSOCOCV(SOC, OCV, SOCOCV):
-    #generate a set of evenly spaced values between the min and max values of soc data
+    """
+    - plots the soc-ocv polynomial fit curve
+    - generates a set of evenly spaced values between the min and max values of soc data
+    - compute corresponding ocv values
+    """
+    
+    SOCOCV_func = np.poly1d(SOCOCV)
     SOC_fit = np.linspace(SOC.min(), SOC.max(), 500)
-    #compute corresponding ocv values for soc using polynomial function
-    OCV_fit = SOCOCV(SOC_fit)
+    OCV_fit = SOCOCV_func(SOC_fit)
     
     sns.set(style="whitegrid")
     plt.figure(figsize=(10,6))
@@ -30,7 +41,6 @@ def plotSOCOCV(SOC, OCV, SOCOCV):
     plt.scatter(SOC, OCV, label="Original Data", s=15, color='blue', alpha=0.7)
     plt.plot(SOC_fit, OCV_fit, color='red', linewidth=2.5, linestyle='--', label='Polynomial Fit')
     
-    # Enhance plot with additional formatting
     plt.xlabel('State of Charge (SOC)', fontsize=14)
     plt.ylabel('Open Circuit Voltage (OCV)', fontsize=14)
     plt.title('SOC vs OCV with Polynomial Fit from C/5 OCV discharge test', fontsize=16)
@@ -38,159 +48,249 @@ def plotSOCOCV(SOC, OCV, SOCOCV):
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
-    
-    # Show the plot
+
     plt.tight_layout()
     plt.show()
     
     return
 
-#takes in the soc ocv curve and current state soc value
-#returns the derivative of the curve for matrix C
-def Cmatrix(coeffs, soc):
-    #coefficients of the derivative - rate of change of ocv with respect to soc
-    dSOCOCV = np.polyder(coeffs)
-    
-    #evaluate the polynomial at x = soc (slope of ocv soc curve at that point)
-    dOCV = np.polyval(dSOCOCV, soc)
-    C_x = np.array([[dOCV, -1, -1]])
-    return C_x
 
-#the function to predict the new state value based on current state and control input (current) 
 def f_function(A, B, x, u):
-    x_new = (A @ np.matrix(x).reshape(3, 1)) + (B * u)
+    """
+    - predicts the new state value in a state-space model
+    - uses the current state and control input
+
+    Parameters:
+        A (np.ndarray): state transition matrix (shape: [n, n]).
+        B (np.ndarray): control input matrix (shape: [n, m]).
+        x (np.ndarray): current state vector (shape: [n, 1]).
+        u (np.ndarray): control input vector (shape: [m, 1]).
+    
+    Returns:
+        np.ndarray: predicted new state vector (shape: [n, 1]).
+    """
+    x = np.matrix(x).reshape(-1,1)
+    x_new = (A @ x) + (B * u)
     return x_new
 
+
 def covariance(A, P, Q):
+    """
+    - calculate the updated covariance matrix based on the state transition matrix and process noise covariance.
+    
+    Parameters:
+        A (np.ndarray): state transition matrix (shape: [n, n]).
+        P (np.ndarray): current covariance matrix of the state estimate (shape: [n, n]).
+        Q (np.ndarray): process noise covariance matrix (shape: [n, n]).
+    
+    Returns:
+        np.ndarray: updated covariance matrix (shape: [n, n]).
+    """
     covariance = (A @ P @ A.T) + Q
     return covariance 
 
-# Function that relates soc to ocv - non linearity
+
 def OCV(soc):
-    coeffs, SOCOCV, SOC, OCV = sococvRegression()
-    OCV_value = SOCOCV(soc)
+    """
+    - estimates ocv for a given soc using a polynomial regression model
+
+    Parameters:
+        soc (float or np.ndarray): soc value for which to calculate the ocv
+    
+    Returns:
+        float or np.ndarray: estimated ocv
+    """
+    SOCOCV, _, _ = sococvRegression()
+    OCV_value = np.polyval(SOCOCV, soc)
     return OCV_value
 
-# Function that relates ocv to the terminal voltage
+
 def g(x,D,u):
-    terminal_voltage = OCV(x[0,0]) - x[1, 0] - x[2, 0] - D*u
-    #x[0,0] returns the scalar value while x[0] returns the 1D array of that value
+    """
+    - calculate the terminal voltage based on the state vector, resistance, and control input
+
+    Parameters:
+        x (np.ndarray): state vector
+        D (float): constant R0 value
+        u (float): control input, representing current
+
+    Returns:
+        float: estimated terminal voltage 
+    """
+    terminal_voltage = OCV(x[0,0]) - x[1,0] - x[2,0] - D*u
+    
     return terminal_voltage
+
+
+def Cmatrix(SOCOCV, soc):
+    """
+    - compute C matrix used in the Kalman Gain by linearizing the mapping function
+    - calculates the derivative of the SOC-OCV polynomial curve to determine how the ocv changes
+    with respect to the soc and returns the resulting Jacobian matrix
+
+    Parameters:
+        SOCOCV (np.poly1d): polynomial function representing the ocv as a function of soc
+        soc (float): current soc value at which to compute the derivative
+
+    Returns:
+        np.ndarray: the C matrix, which is a row vector containing:
+            - the derivative of the curve at the given soc value
+            - constant values for resistance components (-1 and -1) to represent certain parameters
+    """
+    
+    dSOCOCV = np.polyder(SOCOCV)
+    dOCV = np.polyval(dSOCOCV, soc)
+    C_k = np.array([dOCV, -1, -1])
+    
+    return C_k
 
 def terminalVoltageToOCV(Vt, x, D, u):
     return Vt + x[1, 0] + x[2, 0] + D*u
 
 def ekf():  
+    """
+    Extended Kalman Filter (EKF) for estimating the State of Charge (SOC) of a battery based on measured terminal voltage and current
+    
+    This function performs the following steps:
+    1. Load battery parameters from an Excel file.
+    2. Define functions to interpolate battery model parameters.
+    3. Perform polynomial regression to obtain the SOC-OCV curve.
+    4. Initialize state variables and parameters.
+    5. Read measurement data from a CSV file.
+    6. Iterate through measurements to update state estimates using EKF.
+        6.1 get current measurement, state estimate and battery parameters based on current soc
+        6.2 compute time constants
+        6.3 define state transition matrix A and control input matrix B
+        6.4 predict new state and covariance
+        6.5 compute estimated terminal voltage
+        6.6 compute measurement Jacobian matrix C
+        6.7 compute measurement residual
+        6.8 compute measurement prediction covariance S
+        6.9 compute kalman gain
+        6.10 update state estimate and covariance matrix
+    
+    Returns:
+        list: Estimated SOC values over time.
+    """
+    
+    # step 1
     parameters = pd.read_excel("/Users/maishimozato/Documents/uoftEce2ndYear/research/dataCollection/battery_model.xlsx")
     
-    #initial SOC
-    SOC_init = 1 
-    #state space x - parameter initialization
-    x_pred = np.array([[SOC_init], [0], [0]]) #shape is (3,1)
-    
-    # these will need to be calculated using the pulse discharge test
-    #functions that interpolate between the given data
+    # step 2
     R0_func = interp1d(parameters['SOC'], parameters['R0'], kind='linear', fill_value='extrapolate')
     R1_func = interp1d(parameters['SOC'], parameters['R1'], kind='linear', fill_value='extrapolate')
     R2_func = interp1d(parameters['SOC'], parameters['R2'], kind='linear', fill_value='extrapolate')
     C1_func = interp1d(parameters['SOC'], parameters['C1'], kind='linear', fill_value='extrapolate')
     C2_func = interp1d(parameters['SOC'], parameters['C2'], kind='linear', fill_value='extrapolate')
     
-    coeffs, SOCOCV, SOC, OCV = sococvRegression()
+    # step 3
+    SOCOCV, SOC, OCV = sococvRegression()
     plotSOCOCV(SOC, OCV, SOCOCV)
-
-    deltaT = 1
-    #capacity in amp-seconds to match time intervals
-    Qnom = 5.8 * 3600 
     
-    R_k = 2.5e-5
-    P_pred = np.array([[0.025, 0, 0],
-                   [0, 0.01, 0],
-                   [0, 0, 0.01]])
-    Q_x = np.array([[1.0, 1e-6, 0],
-                   [0, 1e-5, 0],
-                   [0, 0, 1e-5]])
+    # step 4
+    x_pred = np.array([1, 0, 0]) # initial SOC, v1 and v2
+    
+    deltaT = 1 # time step (sec)
+    Qnom = 5.8 * 3600 # capacity in amp-seconds
+       
+    # initial covariance matrix, representing the uncertainty in initial state estimate
+    # off-diagonal values set to 0 unless there is known correlation between the states
+    P_pred   = np.array([[0.001, 0, 0],
+                      [0, 0.01, 0],
+                      [0, 0, 0.01]])
+    
+    # process noise covariance matrix - uncertainties in model dynamics
+    Q_k   = np.array([[1e-5, 0, 0],
+                      [0, 1e-5, 0], 
+                      [0, 0, 1e-5]])
+    
+    # measurement noise covariance
+    R_k   = 2.5e-5
     
     SOC_estimations = []
-    Vterminal_estimations = []
-    Vterminal_error = []
 
+    # step 5
     df = pd.read_csv('/Users/maishimozato/Documents/uoftEce2ndYear/research/dataCollection/B0005_TTD.csv')
     Vt_actual = df['Voltage_measured']
     current_actual = df['Current_measured']
+    
+    current_actual = - current_actual
     
     step = 1000
     indices = np.arange(0, len(current_actual), step)
     current_sample = current_actual[indices]
     
-    length = len(current_sample)
+    length = len(current_actual)
     
-    for k in range(length):
-        u = current_actual[k]
-        soc = x_pred[0, 0]
+    # step 6
+    for k in range(1, 2500):
         
-        #scalar values
+        # 6.1
+        u = current_actual[k]
+        v_measured = Vt_actual[k]
+        soc = x_pred[0]
+        print(soc)
+        
         R0 = R0_func(soc)
         R1 = R1_func(soc)
         R2 = R2_func(soc)
         C1 = C1_func(soc)
         C2 = C2_func(soc)
         
-        #time intervals in seconds
+        # 6.2
         tau1 = R1*C1
         tau2 = R2*C2
-        #state transition matrix
-        A = np.matrix([[1,0,0], 
+        
+        # 6.3
+        A_k = np.matrix([[1,0,0], 
                  [0, np.exp(-deltaT/(tau1)),0], 
                  [0,0, np.exp(-deltaT/(tau2))]])
-        #shape is (3,3)
         
-        # identity matrix - no change in the state model from the previous state
-        B = np.matrix([[-deltaT/Qnom], 
+        B_k = np.matrix([[-deltaT/Qnom], 
              [R1*(1 - np.exp(-deltaT/tau1))], 
              [R2*(1 - np.exp(-deltaT/tau2))]])
-        #shape is (3,1)
         
-        x_pred = f_function(A, B, x_pred, u) #shape is (3,1)
-        #covariance/uncertainty associated with state estimate
-        P_pred = covariance(A, P_pred, Q_x) #shape is (3,3)
+        # 6.4
+        x_pred = f_function(A_k, B_k, x_pred, u) 
+        P_pred = covariance(A_k, P_pred, Q_k) 
         
-        # estimated terminal voltage based on estimated soc
-        terminal_voltage = g(x_pred, R0, u) #scalar
-        Vterminal_estimations.append(terminal_voltage)
+        # 6.5
+        terminal_voltage = g(x_pred, R0, u)
         
-        C_x = Cmatrix(coeffs, soc) #shape is (1,3)
+        # 6.6
+        C_k = Cmatrix(SOCOCV, soc)
+        C_k = np.matrix(C_k) 
         
-        residual = Vt_actual[k] - terminal_voltage #scalar
-        Vterminal_error.append(residual)
+        # 6.7
+        residual = v_measured - terminal_voltage
         
-        S_x = (C_x @ P_pred @ C_x.T) + (R_k * np.eye(3)) #shape is (3,3)
+        # 6.8
+        ones = np.matrix(np.ones((3,3)))
+        S_k = (C_k @ P_pred @ C_k.T) + (R_k * ones)
         
-        KalmanGain = P_pred @ np.linalg.inv(S_x) @ C_x.T #shape is (3,1)
+        # 6.9
+        KalmanGain = P_pred @ S_k @ C_k.T
         
-        #update the state estimation and covariance matrix
-        # Ensure residual is a 1D array for matrix multiplication
-        x_pred = x_pred + (KalmanGain * residual)
-        SOC_estimations.append(x_pred[0,0])
+        # 6.10
+        x_pred = x_pred + (KalmanGain * int(residual))
+        # ensure residual is a 1D array for matrix multiplication
+        x_pred = np.array([x_pred[0,0], x_pred[1,0], x_pred[2,0]])
         
-        I = np.eye(3)
-        P_pred = (I - (KalmanGain @ C_x)) @ (P_pred)
+        SOC_estimations.append(x_pred[0])
         
-    return SOC_estimations, Vterminal_estimations, Vterminal_error
+        I = np.eye(3,3)
+        P_pred = (I - (KalmanGain @ C_k)) @ (P_pred)
+        
+    return SOC_estimations
 
 def plot(estimations, intervals):
     estimations = np.array(estimations)
     intervals = np.array(intervals)
     
-    if estimations.ndim != 1:
-        raise ValueError("estimations must be a 1D array")
-    if intervals.ndim != 1:
-        raise ValueError("intervals must be a 1D array")
-    
     plt.figure(figsize=(10,6))
     plt.plot(intervals, estimations, marker='o')
 
-def plot_results(SOC_estimations, Vterminal_estimations, Vterminal_error):
+def plot_results(SOC_estimations):
     plt.figure(figsize=(12, 6))
     
     plt.subplot(3, 1, 1)
@@ -199,51 +299,9 @@ def plot_results(SOC_estimations, Vterminal_estimations, Vterminal_error):
     plt.xlabel('Time')
     plt.ylabel('SOC')
     plt.legend()
-
-    plt.subplot(3, 1, 2)
-    plt.plot(Vterminal_estimations, label='Estimated Terminal Voltage')
-    plt.title('Terminal Voltage Estimation')
-    plt.xlabel('Time')
-    plt.ylabel('Voltage')
-    plt.legend()
-
-    plt.subplot(3, 1, 3)
-    plt.plot(Vterminal_error, label='Voltage Error')
-    plt.title('Voltage Error')
-    plt.xlabel('Time')
-    plt.ylabel('Error')
-    plt.legend()
     
     plt.tight_layout()
     plt.show()
 
-SOC_estimations, Vterminal_estimations, Vterminal_error = ekf()
-plot_results(SOC_estimations, Vterminal_estimations, Vterminal_error)
-
-# df = pd.read_csv('/Users/maishimozato/Documents/uoft ece - 2nd year/research/B0005_TTD.csv')
-# RecordingTime            = df['Time']
-# Measured_Voltage         = df['Voltage_measured']
-# Measured_Current         = df['Current_measured']
-# Measured_Temperature     = df['Temperature_measured'] 
-
-# plt.figure(figsize=(12, 6))
-
-# # Plot SOC estimations vs. actual SOC measurements
-# plt.subplot(2, 1, 1)
-# plt.plot(socEstimated, label='Estimated SOC', linestyle='--')
-# plt.xlabel('Time Step')
-# plt.ylabel('State of Charge (SOC)')
-# plt.legend()
-# plt.title('SOC Estimations vs. Actual Measurements')
-
-# # Plot Terminal Voltage estimations vs. actual terminal voltage measurements
-# plt.subplot(2, 1, 2)
-# plt.plot(df['Voltage_measured'], label='Actual Voltage')
-# plt.plot(VterminalEstimated, label='Estimated Voltage', linestyle='--')
-# plt.xlabel('Time Step')
-# plt.ylabel('Terminal Voltage (V)')
-# plt.legend()
-# plt.title('Terminal Voltage Estimations vs. Actual Measurements')
-
-# plt.tight_layout()
-# plt.show()
+SOC_estimations = ekf()
+plot_results(SOC_estimations)
